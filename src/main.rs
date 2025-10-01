@@ -1,14 +1,6 @@
-mod app;
-mod audio;
-mod capture;
-mod config;
-mod hotkeys;
-mod logging;
-mod openai;
-mod session;
-
 use anyhow::Result;
 use eframe::egui;
+use ghost_ai::{app, logging};
 
 fn main() -> Result<()> {
     logging::init_logging();

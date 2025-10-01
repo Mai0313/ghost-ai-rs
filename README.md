@@ -20,7 +20,7 @@ Ghost AI is a privacy-first desktop assistant implemented entirely in Rust. It c
 - Async runtime: [`tokio`](https://tokio.rs/) drives background work, hotkeys, and API requests.
 - Audio: [`cpal`](https://github.com/RustAudio/cpal) and [`hound`](https://github.com/ruuda/hound) manage capture and encoding.
 - Screenshots: [`screenshots`](https://github.com/robmikh/screenshot-rs) ensures images stay in RAM.
-- Configuration: human readable `config.toml` persisted under the user configuration directory.
+- Configuration: human readable `config.json` persisted under the user configuration directory.
 
 ## Quick Start
 
@@ -43,18 +43,19 @@ The first run asks for your OpenAI credentials and preferred defaults. Settings 
 You can change bindings from the Settings panel inside the application.
 
 ## Development Workflow
-- `cargo check` for fast verification during edits.
-- `cargo fmt` to format sources.
-- `cargo clippy -- -D warnings` to keep lints clean.
-- `cargo test` to run unit tests (when available).
+- `cargo check` for quick validation during edits.
+- `make fmt` to format and lint (runs `cargo fmt` and `cargo clippy`).
+- `make test` or `cargo test --all` to exercise unit and integration suites.
+- `make coverage` to generate coverage reports via `cargo-llvm-cov`.
+- Use the `.devcontainer/` and `docker/` setups when you need a reproducible toolchain.
 
 Static resources such as `ghost.ico` are bundled at build time. Release artifacts can be produced with `cargo build --release` and packaged with your platform-specific tooling if required.
 
 ## Configuration Files
-All runtime configuration is stored in `config.toml` under the standard OS configuration directory:
-- Windows: `%APPDATA%/ghost-ai/config.toml`
-- macOS: `~/Library/Application Support/ghost-ai/config.toml`
-- Linux: `~/.config/ghost-ai/config.toml`
+All runtime configuration is stored in `config.json` under the standard OS configuration directory:
+- Windows: `%APPDATA%/ghost-ai/config.json`
+- macOS: `~/Library/Application Support/ghost-ai/config.json`
+- Linux: `~/.config/ghost-ai/config.json`
 
 Prompts and conversation history are persisted in the same directory. Delete the folder to reset the application.
 
@@ -68,3 +69,6 @@ Please run the formatting and linting commands listed above before opening a PR.
 
 ## License
 Ghost AI is distributed under the MIT License. See [LICENSE](LICENSE) for details.
+
+
+

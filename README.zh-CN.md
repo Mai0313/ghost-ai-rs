@@ -20,7 +20,7 @@ Ghost AI 是一个完全由 Rust 编写的隐私优先桌面助手。它可以�
 - 异步运行时：[`tokio`](https://tokio.rs/) 负责后台任务、快捷键以及 API 请求。
 - 音频：[`cpal`](https://github.com/RustAudio/cpal) 与 [`hound`](https://github.com/ruuda/hound) 提供录音与编码能力。
 - 截图：[`screenshots`](https://github.com/robmikh/screenshot-rs) 确保图像仅在内存中存在。
-- 配置：人类可读的 `config.toml` 保存在用户配置目录下。
+- 配置：人类可读的 `config.json` 保存在用户配置目录下。
 
 ## 快速开始
 
@@ -51,10 +51,10 @@ cargo run --release
 静态资源如 `ghost.ico` 会在构建阶段一起打包。如需发布正式版本，可执行 `cargo build --release` 并使用各平台工具封装安装包。
 
 ## 配置文件
-运行时配置保存在标准操作系统目录的 `config.toml` 中：
-- Windows：`%APPDATA%/ghost-ai/config.toml`
-- macOS：`~/Library/Application Support/ghost-ai/config.toml`
-- Linux：`~/.config/ghost-ai/config.toml`
+运行时配置保存在标准操作系统目录的 `config.json` 中：
+- Windows：`%APPDATA%/ghost-ai/config.json`
+- macOS：`~/Library/Application Support/ghost-ai/config.json`
+- Linux：`~/.config/ghost-ai/config.json`
 
 提示模板与会话记录同样位于该目录。删除该文件夹即可重置应用。
 

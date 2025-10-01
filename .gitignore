@@ -1,6 +1,7 @@
 # Build artifacts
 /target/
 /release/
+debug
 
 # Logs and runtime
 logs/
@@ -10,6 +11,13 @@ logs/
 
 # Backup files
 **/*.rs.bk
+
+# Mutation testing outputs
+**/mutants.out*/
+
+# Windows/MSVC artifacts
+*.pdb
+*.info
 
 # OS / editor files
 .DS_Store
