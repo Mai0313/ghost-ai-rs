@@ -1,0 +1,24 @@
+# Build artifacts
+/target/
+/release/
+
+# Logs and runtime
+logs/
+*.log
+*.pid
+*.pid.lock
+
+# Backup files
+**/*.rs.bk
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Environment configuration
+.env
+.env.*
+!.env.example
