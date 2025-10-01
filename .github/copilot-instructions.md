@@ -13,6 +13,7 @@ Ghost AI is an invisible AI-powered desktop assistant written in Rust. The proje
 ## Technical Architecture
 
 ### Project Structure
+
 ```
 ghost-ai/
 |- src/
@@ -37,6 +38,7 @@ ghost-ai/
 ```
 
 ### Key Runtime Components
+
 - UI layer: `eframe` + `egui` render the assistant interface
 - Audio I/O: `cpal` and `hound` handle capture and playback
 - Networking: `reqwest` provides async HTTP for OpenAI APIs
@@ -46,6 +48,7 @@ ghost-ai/
 ## Development Environment
 
 ### Prerequisites
+
 - Rust toolchain (managed through `rustup`)
 - Cargo package manager (installed with Rust toolchain)
 - Git
@@ -53,6 +56,7 @@ ghost-ai/
 - Make (optional, for convenience commands)
 
 ### Getting Started
+
 ```bash
 # Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -64,6 +68,7 @@ cargo build
 ```
 
 ### Daily Commands
+
 ```bash
 # Formatting and linting
 make fmt
@@ -94,6 +99,7 @@ cargo package --locked --allow-dirty
 ```
 
 ### Recommended Workflow
+
 - Run `cargo build` frequently while developing new features
 - Before committing, run `make fmt` and `make test`
 - Before pushing, execute the full `cargo test --all --verbose`
@@ -101,11 +107,13 @@ cargo package --locked --allow-dirty
 ## Build and Release Process
 
 ### Local Release Build
+
 ```bash
 cargo build --release --locked
 ```
 
 ### Supported Release Targets
+
 - x86_64-unknown-linux-gnu
 - x86_64-unknown-linux-musl
 - aarch64-unknown-linux-gnu
@@ -116,11 +124,13 @@ cargo build --release --locked
 - aarch64-pc-windows-msvc
 
 ### Release Workflow
+
 1. Tag the release: `git tag -a v1.0.0 -m "Release v1.0.0"`
 2. Push the tag: `git push origin v1.0.0`
 3. `build_release.yml` runs to build and publish release assets
 
 ### Asset Naming Convention
+
 - Unix: `ghost-ai-v{version}-{target}.tar.gz`
 - Windows: `ghost-ai-v{version}-{target}.zip`
 
@@ -129,6 +139,7 @@ Example: `ghost-ai-v1.0.0-x86_64-unknown-linux-gnu.tar.gz`
 ## CI/CD Workflows
 
 ### Core Workflows
+
 1. `test.yml`: Runs formatting, linting, and tests with coverage
 2. `code-quality-check.yml`: Enforces code formatting and linting
 3. `build_package.yml`: Produces publishable Cargo packages
@@ -136,6 +147,7 @@ Example: `ghost-ai-v1.0.0-x86_64-unknown-linux-gnu.tar.gz`
 5. `build_release.yml`: Cross-compiles binaries for tagged releases
 
 ### Automation Features
+
 - Automatic PR labelling based on file paths and branches
 - Security scanning for dependencies and secrets
 - Release drafting with change aggregation
@@ -145,13 +157,16 @@ Example: `ghost-ai-v1.0.0-x86_64-unknown-linux-gnu.tar.gz`
 ## Quality Standards
 
 ### Rust Code Guidelines
+
 - Format with `rustfmt`
 - Address all `clippy` warnings (fail CI if any remain)
 - Document public interfaces when they stabilise
 - Add unit or integration tests for new behaviour
 
 ### Commit Conventions
+
 Follow [Conventional Commits](https://conventionalcommits.org/):
+
 ```
 <type>[optional scope]: <description>
 
@@ -159,9 +174,11 @@ Follow [Conventional Commits](https://conventionalcommits.org/):
 
 [optional footer(s)]
 ```
+
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 ### Pull Request Checklist
+
 - All CI checks green
 - Conventional commit-style title
 - Tests or docs updated as needed
@@ -170,15 +187,18 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ## Platform Notes
 
 ### Binary Naming
+
 - Unix targets: binary name `ghost-ai`
 - Windows targets: binary `ghost-ai.exe`
 
 ### Archive Rules
+
 - Unix archives ship as `.tar.gz`
 - Windows archives ship as `.zip`
 - Debug symbols stripped in release builds (`strip = "symbols"`)
 
 ### Platform Dependencies
+
 - MUSL builds require `musl-tools` plus `pkg-config`
 - macOS builds run under Xcode command line tools
 - Windows builds use the MSVC toolchain
@@ -186,15 +206,18 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ## Troubleshooting
 
 ### Common Issues
+
 - MUSL build failures: `sudo apt install -y musl-tools pkg-config`
 - Cross-compilation: use the provided Dockerfile or configure `zig` as a linker
 - Permission errors: verify GitHub token scopes when publishing releases
 
 ### Performance Tips
+
 - Prefer `cargo build --release` when profiling or distributing
 - LTO and symbol stripping are enabled in `Cargo.toml`
 
 ## Security Practices
+
 - Restrict GitHub workflow permissions to least privilege
 - Rotate stored secrets regularly
 - Audit dependency updates prompted by Dependabot
@@ -203,15 +226,18 @@ Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 ## Deployment
 
 ### Docker
+
 ```bash
 docker build -f docker/Dockerfile --target prod -t ghost-ai:latest .
 docker run --rm ghost-ai:latest
 ```
 
 ### Native Binaries
+
 Download platform-specific archives from GitHub Releases and distribute them directly.
 
 ## Contributing
+
 1. Fork the repository
 2. Create a feature branch
 3. Implement changes following the guidelines above
@@ -220,6 +246,7 @@ Download platform-specific archives from GitHub Releases and distribute them dir
 6. Submit a PR with a conventional commit title
 
 ## Helpful References
+
 - [Rust Documentation](https://doc.rust-lang.org/)
 - [Cargo Book](https://doc.rust-lang.org/cargo/)
 - [GitHub Actions Docs](https://docs.github.com/en/actions)

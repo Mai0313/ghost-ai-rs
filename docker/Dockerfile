@@ -1,6 +1,6 @@
 FROM rust:1.89.0-alpine AS builder
 
-LABEL maintainer="Ghost AI Maintainers" \
+LABEL maintainer="Wei Lee <mai@mai0313.com>" \
     org.label-schema.name="ghost-ai" \
     org.label-schema.vendor="Ghost AI" \
     org.label-schema.schema-version="1.0" \
