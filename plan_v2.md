@@ -1,16 +1,20 @@
 **專案概觀**
+
 - 產品定位：隱私優先、跨平台的桌面 AI 助手。「隱形 HUD」可用熱鍵即時叫出，支援截圖＋視覺問答、語音即時轉錄、與對話歷史導覽／重生。
 - 既有技術棧：Electron + React + Vite（前端），主進程管理全域熱鍵、螢幕截圖、OpenAI 串流、會話與日誌，Renderer 經由 `preload` 使用 IPC 互動。
 - 外部依賴：OpenAI API（Responses API 串流、Models 列表、Realtime 轉錄 WebSocket）。
 - 資料儲存：`~/.ghost-ai`（設定、使用者偏好、提示詞、會話日誌）。OpenAI 設定採 `safeStorage` 加密；提示詞檔僅讀；截圖只在記憶體處理，不落地。
 
 **現有功能盤點**
-- HUD/Overlay（src/main/main.ts, src/components/*）
+
+- HUD/Overlay（src/main/main.ts, src/components/\*）
+
   - 透明、無框、置頂、略過工作列；預設 click-through，滑過 UI 時取消 click-through。
   - 托盤選單：`Show Overlay`、`Toggle Hide`、`Quit`；應用選單（File/View）含顯示、隱藏、Reload(F5)、Toggle DevTools。
   - 視覺元素：上方 HUDBar（Listen/Ask/Hide/Settings），下方氣泡（Ask 面板/設定卡/轉錄泡泡）。可拖曳 HUDBar。
 
 - 全域熱鍵（src/main/modules/hotkey-manager.ts, src/main/main.ts）
+
   - `Ctrl/Cmd+Enter`：切換 Ask 面板（與 Audio Toggle 有抑制機制，避免連動）。
   - `Ctrl/Cmd+\`：切換隱藏 HUD。
   - `Ctrl/Cmd+R`：清除會話（中止分析串流、重置記憶體歷史、清空 SessionStore、滾動 ID）。
@@ -19,6 +23,7 @@
   - `Ctrl/Cmd+Shift+Up/Down`：歷史回答分頁導覽（上一頁／下一頁／回到 Live）。
 
 - 截圖與分析（src/main/modules/screenshot-manager.ts, src/main/modules/hide-manager.ts, src/shared/openai-client.ts, src/main/main.ts）
+
   - 截圖：`screenshot-desktop` 取得 PNG Buffer，最多重試 3 次（200ms/400ms/800ms 退避）。
   - 螢幕隱藏：呼叫 `hideAllWindowsDuring` 在擷取時隱藏所有視窗，避免截到 HUD。
   - 是否附圖：由使用者偏好 `attachScreenshot` 決定（預設 true）。
@@ -30,26 +35,31 @@
   - 主進程以 IPC 廣播四事件：`capture:analyze-stream:start|delta|done|error`，Renderer據以更新 UI。
 
 - 提示詞（src/main/modules/prompts-manager.ts, Settings.tsx）
+
   - 路徑：`~/.ghost-ai/prompts`。
   - 僅讀模式：不會自動建立預設檔，`ensureDefaultPrompt` 為 no-op。
   - 活動提示詞：名稱持久化於使用者設定；第一輪分析必須存在檔案，否則回傳錯誤訊息「No active prompt selected…」。
 
 - 會話與歷史（src/main/main.ts, src/main/modules/session-store.ts, src/main/modules/log-manager.ts）
+
   - 以 `currentSessionId` 標識；`Ctrl/Cmd+R` 清除後重生新 ID。
   - 記憶體內累積純文字 QA 歷史（格式：`Q: ...\nA: ...`）。
   - 第一輪使用的初始提示詞會快取於 `initialPromptBySession`，在重生（regenerate）時維持一致上下文。
   - 寫檔：`~/.ghost-ai/logs/<sessionId>/<sessionId>.log`（純文字）與 `<sessionId>.json`（SessionStore 摘要）。
 
 - 重生（Regenerate）（App.tsx, AskPanel.tsx, main.ts）
+
   - 取當頁回答對應的前一用戶消息作為提問，再用「先前配對 QA」組成 `priorPlain` 傳回主進程；主進程重建上下文並重新請求串流。
   - 成功後更新歷史並回到 Live；串流過程可取消／清除。
 
 - 語音即時轉錄（src/main/modules/realtime-transcribe.ts, src/hooks/useTranscription.ts）
+
   - UI：WebAudio 混合麥克風＋系統音，重採樣為 24kHz mono，打包 PCM16 base64，批次送至主進程。
   - 主進程：以 `wss://api.openai.com/v1/realtime?intent=transcription` 連線，`server_vad`，語言 `en|zh`，模型預設 `gpt-4o-mini-transcribe`（程式內使用 `gpt-4o-realtime-preview-2025-06-03` 作為 WS 端的轉錄模型）。
   - 事件：`transcribe:start|delta|done|error|closed`；Renderer 將片段累積成轉錄內容並可直接作為 Ask 前綴。
 
 - 設定與模型（src/components/Settings.tsx, src/main/modules/settings-manager.ts, src/shared/openai-client.ts）
+
   - OpenAI 設定：`apiKey`、`baseURL`、`model`、`timeout`、`maxTokens?`、`temperature?`。
   - 憑證保存：加密 JSON（`safeStorage` 可用時使用），另將 `baseURL`、`model` 明文存放以利顯示。
   - 模型列表：以 `client.models.list()` 過濾白名單 `allowedModels=[chatgpt-4o-latest,gpt-4o,gpt-4.1,o4-mini-2025-04-16,gpt-5,gpt-5-mini]`，失敗回傳白名單作 fallback。
@@ -57,6 +67,7 @@
   - 使用者偏好：`transcribeLanguage(en|zh)`、`attachScreenshot(boolean)` 等。
 
 - IPC 與事件（src/main/preload.ts, src/main/main.ts）
+
   - Renderer → Main（invoke/send）：
     - `openai:update-config`、`openai:update-config-volatile`、`openai:get-config`、`openai:list-models`、`openai:validate-config`。
     - `settings:get|update`、`prompts:list|read|get-default|set-default|get-active|set-active`。
@@ -69,17 +80,21 @@
     - 串流：`capture:analyze-stream:start|delta|done|error`；轉錄：`transcribe:start|delta|done|error|closed`。
 
 **Rust 重寫技術架構**
+
 - 平台選型
+
   - 建議使用 Tauri（Rust 主程式 + Web 前端）以替代 Electron：
     - 優點：跨平台、可重用現有 React 前端與瀏覽器媒體能力（getUserMedia/DisplayMedia）。
     - 另案：若完全移除 Web 前端，則以 `winit+wry` 自繪 UI 或以 `iced/dioxus`，成本高、功能等量移植較久。
 
 - 專案結構（建議）
+
   - `apps/ghost-desktop`：Tauri 殼層（視窗、托盤、全域熱鍵、IPC 命令、事件）。
   - `crates/ghost-core`：核心邏輯（OpenAI 客戶端、會話、日誌、提示詞、設定、截圖、音訊 WS）。
   - `web/`：前端（可移植既有 React/Vite 專案）。
 
 - 模組設計對應
+
   - 視窗/HUD：
     - Tauri `WindowBuilder`：透明、無框、置頂、跳過任務列；加入自定義屬性以支援 click-through。
     - Click-through：平台特化 API：
@@ -114,12 +129,14 @@
     - 事件（主程式→前端）對齊名稱與負載欄位，確保無痛移植 UI。
 
 - 資料結構（Rust 等價）
+
   - `OpenAIConfig { api_key, base_url, model, timeout, max_tokens: Option<i32>, temperature: Option<f32> }`
   - `AnalysisResult { request_id, content, model, timestamp, session_id }`
   - `SessionEntry { index, request_id, text_input, ai_output }`
   - `UserSettings { transcribe_language: Enum(en|zh), attach_screenshot: bool, default_prompt: String, ... }`
 
 **行為細節與對應（保真要求）**
+
 - Ask 首輪：
   - 需成功讀到活動提示詞（檔案存在）；否則回傳錯誤訊息並不送出請求。
   - 問題文字會在主進程與 `priorPlain` 合併成 `combinedTextPrompt`；若有 `priorPlain` 則以「Previous conversation ... / New question ...」格式包裝。
@@ -139,6 +156,7 @@
   - `delta` 串流片段在 UI 累加；`completed` 時送出一次完整句子。
 
 **非功能性需求**
+
 - 跨平台：Windows 10+、macOS 12+、Ubuntu 22.04+。
 - 安全與隱私：
   - 不將截圖落地；OpenAI 設定加密儲存；提示詞僅讀；
@@ -149,6 +167,7 @@
 - 穩定性：所有 IPC/WS 需防呆與重試；Abort/Stop 時靜默處理。
 
 **驗收與測試（Parity）**
+
 - 熱鍵：
   - 每個熱鍵動作觸發對應事件（含 UI 聚焦、視窗顯示、抑制邏輯）。
 - 截圖分析：
@@ -164,6 +183,7 @@
   - `.log` 與 `.json` 內容正確，路徑格式正確。
 
 **遷移步驟與里程碑**
+
 - M0：腳手架
   - 初始化 Tauri 專案、設定 CI（lint/format/build）。
   - 建立 `ghost-core` crate：型別、設定、日誌、提示詞 IO。
@@ -183,6 +203,7 @@
   - 會話日誌開關、除錯 `session:dump` 等輔助；最終驗收。
 
 **相依建議（Rust）**
+
 - OpenAI HTTP：`reqwest`（sse/chunk 解析）或直接讀取 `bytes_stream`。
 - OpenAI WS：`tokio`, `tokio-tungstenite`。
 - 截圖：`screenshot` crate（或 `scrap`）。
@@ -191,12 +212,14 @@
 - 事件/命令：Tauri `emit`/`invoke` 封裝 IPC。
 
 **風險與決策點**
+
 - Click-through 跨平台差異：需要平台特化 API；Windows/Wayland 可能需更低階的視窗旗標或區域裁切。
 - Realtime 轉錄：OpenAI API 版本更新頻率高，需妥善處理相容與降級（模型不可用時的提示與 fallback）。
 - 截圖權限：macOS 需螢幕錄製權限；Linux Wayland 需 portal 介面（可能影響無頭擷取）。
 - 設定加密：不同 OS keyring 行為差異；需合理降級策略（例如加密失效時提醒並改為純文字本機儲存，或阻擋）。
 
 **開發說明與對應 API（摘要）**
+
 - 命令（擬定 Tauri `#[tauri::command]` 對應）：
   - `openai_update_config(OpenAIConfigPartial)`、`openai_update_config_volatile(OpenAIConfigPartial)`、`openai_get_config()`、`openai_list_models()`、`openai_validate_config(OpenAIConfig)`
   - `settings_get()`、`settings_update(UserSettingsPartial)`
@@ -210,11 +233,13 @@
   - `capture:analyze-stream:start|delta|done|error`、`transcribe:start|delta|done|error|closed`
 
 **附錄：檔案與路徑**
+
 - 設定檔：`~/.ghost-ai/config.json`
 - 提示詞：`~/.ghost-ai/prompts/*.txt|md|prompt`
 - 日誌：`~/.ghost-ai/logs/<sessionId>/<sessionId>.log|.json`
 
 **附錄：與現有程式的關鍵對應**
+
 - 允許模型白名單：`src/shared/openai-client.ts:16`
 - Responses 串流事件解析：`src/shared/openai-client.ts:148` 起（reasoning/web_search/answer）
 - 轉錄 WS 事件：`src/main/modules/realtime-transcribe.ts:56` 起
@@ -223,6 +248,7 @@
 - Click-through 控制：`src/main/preload.ts:245` + `src/main/main.ts:367`
 
 **補充建議**
+
 - 保留現有 UI/文案一致性，優先達成功能等量後再考慮 UI 重構。
 - 提供「停用落地日誌」選項，預設依舊啟用（以符合現狀），並於首次啟動提示使用者。
 - 在 Settings 增加「測試 API 連線」按鈕（已有 Test），Rust 版可在失敗時提示診斷資訊（DNS、TLS、Proxy）。

@@ -10,18 +10,18 @@
 
 ## 📋 目錄
 
-1. [專案概覽](#專案概覽)
-2. [核心功能規格](#核心功能規格)
-3. [技術架構設計](#技術架構設計)
-4. [模組詳細規格](#模組詳細規格)
-5. [資料流與狀態管理](#資料流與狀態管理)
-6. [API 與介面定義](#api-與介面定義)
-7. [UI/UX 規格](#uiux-規格)
-8. [安全與隱私要求](#安全與隱私要求)
-9. [效能與最佳化](#效能與最佳化)
-10. [測試策略](#測試策略)
-11. [部署與打包](#部署與打包)
-12. [遷移路線圖](#遷移路線圖)
+01. [專案概覽](#%E5%B0%88%E6%A1%88%E6%A6%82%E8%A6%BD)
+02. [核心功能規格](#%E6%A0%B8%E5%BF%83%E5%8A%9F%E8%83%BD%E8%A6%8F%E6%A0%BC)
+03. [技術架構設計](#%E6%8A%80%E8%A1%93%E6%9E%B6%E6%A7%8B%E8%A8%AD%E8%A8%88)
+04. [模組詳細規格](#%E6%A8%A1%E7%B5%84%E8%A9%B3%E7%B4%B0%E8%A6%8F%E6%A0%BC)
+05. [資料流與狀態管理](#%E8%B3%87%E6%96%99%E6%B5%81%E8%88%87%E7%8B%80%E6%85%8B%E7%AE%A1%E7%90%86)
+06. [API 與介面定義](#api-%E8%88%87%E4%BB%8B%E9%9D%A2%E5%AE%9A%E7%BE%A9)
+07. [UI/UX 規格](#uiux-%E8%A6%8F%E6%A0%BC)
+08. [安全與隱私要求](#%E5%AE%89%E5%85%A8%E8%88%87%E9%9A%B1%E7%A7%81%E8%A6%81%E6%B1%82)
+09. [效能與最佳化](#%E6%95%88%E8%83%BD%E8%88%87%E6%9C%80%E4%BD%B3%E5%8C%96)
+10. [測試策略](#%E6%B8%AC%E8%A9%A6%E7%AD%96%E7%95%A5)
+11. [部署與打包](#%E9%83%A8%E7%BD%B2%E8%88%87%E6%89%93%E5%8C%85)
+12. [遷移路線圖](#%E9%81%B7%E7%A7%BB%E8%B7%AF%E7%B7%9A%E5%9C%96)
 
 ---
 
@@ -39,42 +39,46 @@ Ghost AI 是一個**隱形 AI 桌面助理**,提供以下核心能力:
 
 ### 技術棧對照
 
-| 功能模組 | 原技術棧 (Electron) | 目標技術棧 (Rust) |
-|---------|-------------------|------------------|
-| **桌面框架** | Electron | Tauri / iced / egui |
-| **UI 框架** | React + TypeScript | 待選擇 (見下方建議) |
-| **狀態管理** | React Hooks | Arc\<Mutex\<T\>\> / tokio::sync |
-| **IPC 通訊** | Electron IPC | Tauri Commands / 自訂 async channel |
-| **HTTP 客戶端** | fetch / openai SDK | reqwest + async/await |
-| **WebSocket** | ws (Node.js) | tokio-tungstenite |
-| **音訊處理** | Web Audio API | cpal + hound / dasp |
-| **截圖** | screenshot-desktop | screenshots / xcap |
-| **熱鍵** | Electron globalShortcut | global-hotkey |
-| **檔案存儲** | electron-store | serde_json + fs / rusqlite |
-| **加密** | Electron safeStorage | ring / rustls / keyring |
-| **Markdown 渲染** | BlockNote | pulldown-cmark + 自訂渲染 |
+| 功能模組          | 原技術棧 (Electron)     | 目標技術棧 (Rust)                   |
+| ----------------- | ----------------------- | ----------------------------------- |
+| **桌面框架**      | Electron                | Tauri / iced / egui                 |
+| **UI 框架**       | React + TypeScript      | 待選擇 (見下方建議)                 |
+| **狀態管理**      | React Hooks             | Arc\<Mutex\<T>> / tokio::sync       |
+| **IPC 通訊**      | Electron IPC            | Tauri Commands / 自訂 async channel |
+| **HTTP 客戶端**   | fetch / openai SDK      | reqwest + async/await               |
+| **WebSocket**     | ws (Node.js)            | tokio-tungstenite                   |
+| **音訊處理**      | Web Audio API           | cpal + hound / dasp                 |
+| **截圖**          | screenshot-desktop      | screenshots / xcap                  |
+| **熱鍵**          | Electron globalShortcut | global-hotkey                       |
+| **檔案存儲**      | electron-store          | serde_json + fs / rusqlite          |
+| **加密**          | Electron safeStorage    | ring / rustls / keyring             |
+| **Markdown 渲染** | BlockNote               | pulldown-cmark + 自訂渲染           |
 
 ### UI 框架建議
 
 推薦以下三種方案之一:
 
 #### 方案 A: **Tauri + Web 前端** (推薦用於快速遷移)
+
 - **前端:** React/Vue/Svelte (保留原 UI 邏輯)
 - **後端:** Rust (主進程邏輯)
 - **優點:** 可重用大部分 React 組件,遷移成本低
 - **缺點:** 仍依賴 Web 技術
 
 #### 方案 B: **iced** (推薦用於純 Rust)
+
 - **特性:** 類似 Elm 的響應式 UI,跨平台原生
 - **優點:** 純 Rust,效能優異,易於部署
 - **缺點:** Markdown 渲染需自行實現
 
 #### 方案 C: **egui** (推薦用於即時模式 UI)
+
 - **特性:** 即時模式 GUI,輕量快速
 - **優點:** 非常適合疊加層 UI,低延遲
 - **缺點:** 複雜佈局較困難
 
 **建議選擇:**
+
 - 若要快速遷移 → **Tauri + React**
 - 若要純 Rust 體驗 → **iced**
 - 若要極致效能 → **egui**
@@ -103,12 +107,14 @@ Ghost AI 是一個**隱形 AI 桌面助理**,提供以下核心能力:
 ```
 
 **按鈕功能:**
+
 - `Listen` - 開始/停止語音錄製
 - `Ask` - 開啟文字輸入面板
 - `Hide` - 隱藏整個應用
 - `Settings` - 開啟設定面板
 
 **錄音狀態:**
+
 - 未錄製: 顯示 "Listen"
 - 錄製中: 顯示 "Pause" (紅色) + 時間計時器
 - 暫停: 顯示 "Resume"
@@ -294,6 +300,7 @@ async fn capture_screen_internal() -> Result<Vec<u8>, CaptureError> {
 #### 音訊處理規格
 
 **輸入要求:**
+
 - 格式: PCM16 (16-bit signed integer)
 - 採樣率: 24000 Hz (24 kHz)
 - 聲道: 單聲道 (mono)
@@ -940,16 +947,16 @@ impl OpenAIClient {
 
 #### 快捷鍵列表
 
-| 功能 | Windows/Linux | macOS |
-|-----|--------------|-------|
-| 開啟 Ask 面板 | Ctrl+Enter | Cmd+Enter |
+| 功能          | Windows/Linux    | macOS           |
+| ------------- | ---------------- | --------------- |
+| 開啟 Ask 面板 | Ctrl+Enter       | Cmd+Enter       |
 | 開始/停止錄音 | Ctrl+Shift+Enter | Cmd+Shift+Enter |
-| 隱藏/顯示應用 | Ctrl+\ | Cmd+\ |
-| 清除對話 | Ctrl+R | Cmd+R |
-| 向上捲動 | Ctrl+Up | Cmd+Up |
-| 向下捲動 | Ctrl+Down | Cmd+Down |
-| 上一頁 | Ctrl+Shift+Up | Cmd+Shift+Up |
-| 下一頁 | Ctrl+Shift+Down | Cmd+Shift+Down |
+| 隱藏/顯示應用 | Ctrl+\\          | Cmd+\\          |
+| 清除對話      | Ctrl+R           | Cmd+R           |
+| 向上捲動      | Ctrl+Up          | Cmd+Up          |
+| 向下捲動      | Ctrl+Down        | Cmd+Down        |
+| 上一頁        | Ctrl+Shift+Up    | Cmd+Shift+Up    |
+| 下一頁        | Ctrl+Shift+Down  | Cmd+Shift+Down  |
 
 #### Rust 實現
 
@@ -2073,6 +2080,7 @@ impl Theme {
 ### 佈局規格
 
 **HUD 控制列:**
+
 - 寬度: 自適應內容
 - 高度: 48px
 - 圓角: 24px
@@ -2081,6 +2089,7 @@ impl Theme {
 - 間距: 12px padding, 8px gap
 
 **Ask 面板:**
+
 - 寬度: 600px
 - 高度: 最大 500px
 - 圓角: 12px
@@ -2089,6 +2098,7 @@ impl Theme {
 - 陰影: 0 8px 32px rgba(0,0,0,0.4)
 
 **Settings 面板:**
+
 - 寬度: 500px
 - 高度: 自適應內容
 - 圓角: 12px
@@ -2123,7 +2133,7 @@ const FONT_SIZE_LARGE: f32 = 16.0;
 
 ### 2. 截圖安全
 
-- ✅ 截圖僅存於記憶體 (Vec\<u8\>)
+- ✅ 截圖僅存於記憶體 (Vec\<u8>)
 - ✅ 使用後立即清除
 - ✅ 不寫入臨時檔案
 - ✅ 不寫入日誌
@@ -2267,15 +2277,16 @@ pulldown-cmark = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = [
-    "Win32_Foundation",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_Graphics_Gdi",
-]}
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+] }
 ```
 
 ### 跨平台打包
 
 **Windows:**
+
 ```bash
 cargo build --release
 cargo install cargo-wix
@@ -2284,6 +2295,7 @@ cargo wix
 ```
 
 **macOS:**
+
 ```bash
 cargo build --release
 cargo install cargo-bundle
@@ -2291,6 +2303,7 @@ cargo bundle --release
 ```
 
 **Linux:**
+
 ```bash
 cargo build --release
 cargo install cargo-deb
@@ -2377,41 +2390,42 @@ cargo deb
 
 ### A. 依賴庫完整列表
 
-| 庫名稱 | 用途 | 替代方案 |
-|-------|------|---------|
-| tauri | 桌面應用框架 | iced, egui |
-| tokio | 非同步執行時 | async-std |
-| reqwest | HTTP 客戶端 | hyper, ureq |
-| tokio-tungstenite | WebSocket | tungstenite |
-| cpal | 音訊擷取 | rodio |
-| screenshots | 截圖 | xcap |
-| global-hotkey | 全域熱鍵 | - |
-| keyring | 鑰匙圈存儲 | - |
-| serde | 序列化 | - |
-| pulldown-cmark | Markdown 解析 | comrak |
+| 庫名稱            | 用途          | 替代方案    |
+| ----------------- | ------------- | ----------- |
+| tauri             | 桌面應用框架  | iced, egui  |
+| tokio             | 非同步執行時  | async-std   |
+| reqwest           | HTTP 客戶端   | hyper, ureq |
+| tokio-tungstenite | WebSocket     | tungstenite |
+| cpal              | 音訊擷取      | rodio       |
+| screenshots       | 截圖          | xcap        |
+| global-hotkey     | 全域熱鍵      | -           |
+| keyring           | 鑰匙圈存儲    | -           |
+| serde             | 序列化        | -           |
+| pulldown-cmark    | Markdown 解析 | comrak      |
 
 ### B. 原專案與 Rust 專案對照表
 
-| 原檔案 (TypeScript) | Rust 模組 |
-|-------------------|----------|
-| main/main.ts | src/main.rs |
-| main/modules/hotkey-manager.ts | src/hotkey.rs |
-| main/modules/screenshot-manager.ts | src/screenshot.rs |
-| main/modules/settings-manager.ts | src/settings.rs |
-| main/modules/prompts-manager.ts | src/prompts.rs |
-| main/modules/realtime-transcribe.ts | src/audio/realtime.rs |
-| main/modules/log-manager.ts | src/log.rs |
-| main/modules/session-store.ts | src/conversation.rs |
-| shared/openai-client.ts | src/openai.rs |
-| hooks/useTranscription.ts | src/audio/processor.rs |
-| components/App.tsx | src/ui/app.rs |
-| components/AskPanel.tsx | src/ui/ask_panel.rs |
-| components/HUDBar.tsx | src/ui/hud.rs |
-| components/Settings.tsx | src/ui/settings.rs |
+| 原檔案 (TypeScript)                 | Rust 模組              |
+| ----------------------------------- | ---------------------- |
+| main/main.ts                        | src/main.rs            |
+| main/modules/hotkey-manager.ts      | src/hotkey.rs          |
+| main/modules/screenshot-manager.ts  | src/screenshot.rs      |
+| main/modules/settings-manager.ts    | src/settings.rs        |
+| main/modules/prompts-manager.ts     | src/prompts.rs         |
+| main/modules/realtime-transcribe.ts | src/audio/realtime.rs  |
+| main/modules/log-manager.ts         | src/log.rs             |
+| main/modules/session-store.ts       | src/conversation.rs    |
+| shared/openai-client.ts             | src/openai.rs          |
+| hooks/useTranscription.ts           | src/audio/processor.rs |
+| components/App.tsx                  | src/ui/app.rs          |
+| components/AskPanel.tsx             | src/ui/ask_panel.rs    |
+| components/HUDBar.tsx               | src/ui/hud.rs          |
+| components/Settings.tsx             | src/ui/settings.rs     |
 
 ### C. 關鍵決策記錄
 
 **決策 1: UI 框架選擇**
+
 - **建議:** Tauri (如需快速遷移) 或 iced (純 Rust)
 - **理由:**
   - Tauri 允許重用 React 組件
@@ -2419,17 +2433,20 @@ cargo deb
 - **風險:** iced 的 Markdown 渲染需自行實現
 
 **決策 2: 音訊處理位置**
+
 - **選擇:** 在主應用中處理 (而非獨立進程)
 - **理由:** 簡化架構,減少 IPC 開銷
 - **風險:** 音訊處理可能影響 UI 流暢度 (需測試)
 
 **決策 3: 狀態管理**
-- **選擇:** Arc\<Mutex\<T\>\> / Arc\<RwLock\<T\>\>
+
+- **選擇:** Arc\<Mutex\<T>> / Arc\<RwLock\<T>>
 - **理由:** 簡單直接,適合中小型應用
 - **替代:** 使用狀態管理庫 (如 redux-rs)
 
 **決策 4: 錯誤處理**
-- **選擇:** thiserror + Result\<T, E\>
+
+- **選擇:** thiserror + Result\<T, E>
 - **理由:** Rust 慣用做法,類型安全
 - **替代:** anyhow (更靈活但失去類型資訊)
 
@@ -2445,6 +2462,7 @@ cargo deb
 ✅ **跨平台** - 統一的程式碼庫,原生編譯
 
 **後續步驟:**
+
 1. 選擇 UI 框架 (建議先用 Tauri 快速驗證概念)
 2. 實現 MVP (HUD + Ask 面板 + OpenAI 整合)
 3. 逐步添加音訊轉錄和進階功能
