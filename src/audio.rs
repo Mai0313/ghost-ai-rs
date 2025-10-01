@@ -29,12 +29,13 @@ impl AudioRecorder {
             .default_input_config()
             .context("failed to query default input config")?;
         let sample_rate = config.sample_rate().0;
+        let sample_format = config.sample_format();
         let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
         let stream = build_stream(
             &device,
             &config.into(),
-            config.sample_format(),
+            sample_format,
             Arc::clone(&buffer),
         )?;
         stream.play().context("failed to begin audio capture")?;

@@ -187,7 +187,7 @@ impl GhostApp {
         }
     }
 
-    fn process_hotkeys(&mut self, frame: &mut eframe::Frame) {
+    fn process_hotkeys(&mut self, _frame: &mut eframe::Frame) {
         while let Ok(action) = self.hotkey_rx.try_recv() {
             match action {
                 HotkeyAction::ToggleAskPanel => {
@@ -206,7 +206,7 @@ impl GhostApp {
                 }
                 HotkeyAction::ToggleHidden => {
                     self.is_hidden = !self.is_hidden;
-                    frame.set_minimized(self.is_hidden);
+                    // Note: Window visibility will be controlled in update() method
                 }
                 HotkeyAction::ClearSession => {
                     self.clear_session();
@@ -221,7 +221,24 @@ impl GhostApp {
     }
 
     fn capture_and_attach(&mut self) -> Result<()> {
+        // Check if we should hide before capture
+        let should_hide = self.config.capture.hide_before_capture;
+
+        if should_hide {
+            // Signal that we want to hide the window
+            // Note: The actual hiding will happen in the next update cycle
+            self.is_hidden = true;
+            // Give the window manager time to hide the window
+            std::thread::sleep(Duration::from_millis(200));
+        }
+
         let capture = capture_screen(self.config.capture.mode.clone())?;
+
+        if should_hide {
+            // Restore window visibility
+            self.is_hidden = false;
+        }
+
         let attachment = ScreenshotAttachment::from_capture(capture)?;
         self.attach = Some(attachment);
         self.attach_texture = None;
@@ -409,7 +426,7 @@ impl GhostApp {
         }
     }
 
-    fn render_hud(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    fn render_hud(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.horizontal(|ui| {
             let listen_label = if self.is_recording {
                 "Stop Recording"
@@ -444,7 +461,7 @@ impl GhostApp {
                 .clicked()
             {
                 self.is_hidden = !self.is_hidden;
-                frame.set_minimized(self.is_hidden);
+                // Note: Window visibility will be controlled in update() method
             }
 
             if ui.button("Settings").clicked() {
@@ -519,10 +536,12 @@ impl GhostApp {
             }
         });
 
-        if let Some(att) = &mut self.attach {
+        // Separate the attachment rendering to avoid borrow checker issues
+        let (width, height) = self.attach.as_ref().map(|a| (a.width, a.height)).unwrap_or((0, 0));
+        if self.attach.is_some() {
             self.ensure_attachment_texture(ctx);
             ui.separator();
-            ui.label(format!("Attached screenshot: {}x{}", att.width, att.height));
+            ui.label(format!("Attached screenshot: {}x{}", width, height));
             if let Some(tex) = self.attach_texture.as_ref().map(|t| t.texture.clone()) {
                 let size = tex.size_vec2();
                 let max_width = 240.0;
@@ -531,7 +550,7 @@ impl GhostApp {
                 } else {
                     1.0
                 };
-                ui.image(tex, size * scale);
+                ui.image(egui::load::SizedTexture::new(tex.id(), size * scale));
             }
         }
         if self.active_request.is_some() {
@@ -553,9 +572,10 @@ impl GhostApp {
     }
 
     fn render_settings(&mut self, ctx: &egui::Context) {
-        if self.settings_open {
+        let mut settings_open = self.settings_open;
+        if settings_open {
             egui::Window::new("Settings")
-                .open(&mut self.settings_open)
+                .open(&mut settings_open)
                 .resizable(true)
                 .default_width(420.0)
                 .show(ctx, |ui| {
@@ -571,7 +591,7 @@ impl GhostApp {
                         ui.add(
                             egui::DragValue::new(&mut self.config.openai.temperature)
                                 .speed(0.05)
-                                .clamp_range(0.0..=2.0),
+                                .range(0.0..=2.0),
                         );
                     });
                     ui.separator();
@@ -648,6 +668,7 @@ impl GhostApp {
                         }
                     }
                 });
+            self.settings_open = settings_open;
         }
     }
 }
@@ -656,6 +677,16 @@ impl eframe::App for GhostApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.process_background_events();
         self.process_hotkeys(frame);
+
+        // Handle window visibility based on is_hidden state
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(!self.is_hidden));
+
+        // Set transparent background
+        let frame_bg = egui::Color32::from_rgba_premultiplied(0, 0, 0, (255.0 * 0.95) as u8);
+        let mut style = (*ctx.style()).clone();
+        style.visuals.window_fill = frame_bg;
+        style.visuals.panel_fill = frame_bg;
+        ctx.set_style(style);
 
         egui::TopBottomPanel::top("hud").show(ctx, |ui| self.render_hud(ui, frame));
 

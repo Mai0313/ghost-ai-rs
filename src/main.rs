@@ -11,8 +11,13 @@ fn main() -> Result<()> {
     let _guard = runtime.enter();
 
     let native_options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(900.0, 640.0)),
-        follow_system_theme: true,
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size(egui::vec2(900.0, 640.0))
+            .with_always_on_top()
+            .with_transparent(true)
+            .with_decorations(true) // Keep decorations for now (can be disabled later)
+            .with_resizable(true),
+        follow_system_theme: false,
         centered: true,
         ..eframe::NativeOptions::default()
     };
@@ -20,7 +25,7 @@ fn main() -> Result<()> {
     let result = eframe::run_native(
         "Ghost AI",
         native_options,
-        Box::new(move |cc| Box::new(app::GhostApp::new(cc, handle.clone()))),
+        Box::new(move |cc| Ok(Box::new(app::GhostApp::new(cc, handle.clone())))),
     );
 
     if let Err(err) = result {
