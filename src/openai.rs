@@ -3,10 +3,12 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose, Engine};
+use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::multipart::{Form, Part};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::audio::RecordingResult;
@@ -33,6 +35,13 @@ pub struct AnalyzeResponse {
     pub model: String,
 }
 
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Delta(String),
+    Done(String),
+    Error(String),
+}
+
 pub struct OpenAIClient {
     http: Client,
 }
@@ -44,6 +53,84 @@ impl OpenAIClient {
             .timeout(Duration::from_secs(120))
             .build()?;
         Ok(Self { http })
+    }
+
+    pub async fn analyze_stream(
+        &self,
+        request: AnalyzeRequest,
+        stream_tx: UnboundedSender<(Uuid, StreamEvent)>,
+    ) -> Result<AnalyzeResponse> {
+        let url = build_endpoint(&request.config.base_url, CHAT_COMPLETIONS_PATH)?;
+        let mut headers = auth_headers(&request.config.api_key)?;
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let mut payload = build_chat_payload(&request)?;
+        payload.stream = true;
+
+        let request_id = request.request_id;
+        let model = request.config.model.clone();
+
+        let res = self
+            .http
+            .post(url)
+            .headers(headers)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to send chat completion request")?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            let error = format!("OpenAI request failed with status {status}: {body}");
+            let _ = stream_tx.send((request_id, StreamEvent::Error(error.clone())));
+            return Err(anyhow!(error));
+        }
+
+        let mut stream = res.bytes_stream();
+        let mut full_text = String::new();
+        let mut buffer = String::new();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("failed to read chunk from stream")?;
+            let text = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&text);
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if line.is_empty() || !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+
+                match serde_json::from_str::<StreamChunk>(data) {
+                    Ok(chunk) => {
+                        if let Some(choice) = chunk.choices.first() {
+                            if let Some(content) = &choice.delta.content {
+                                full_text.push_str(content);
+                                let _ = stream_tx.send((request_id, StreamEvent::Delta(content.clone())));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        log::warn!("failed to parse stream chunk: {err}");
+                    }
+                }
+            }
+        }
+
+        let _ = stream_tx.send((request_id, StreamEvent::Done(full_text.clone())));
+
+        Ok(AnalyzeResponse {
+            request_id,
+            answer: full_text,
+            model,
+        })
     }
 
     pub async fn analyze(&self, request: AnalyzeRequest) -> Result<AnalyzeResponse> {
@@ -308,4 +395,19 @@ enum ChatCompletionContent {
 #[derive(Debug, Deserialize)]
 struct TranscriptionResponse {
     pub text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    pub choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    pub delta: StreamDelta,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    pub content: Option<String>,
 }

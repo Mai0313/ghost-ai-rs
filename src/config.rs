@@ -133,8 +133,6 @@ impl Default for TranscriptionSettings {
 pub struct HotkeyConfig {
     #[serde(default = "HotkeyConfig::default_toggle_ask")]
     pub toggle_ask_panel: String,
-    #[serde(default = "HotkeyConfig::default_toggle_record")]
-    pub toggle_record: String,
     #[serde(default = "HotkeyConfig::default_toggle_hide")]
     pub toggle_hide: String,
     #[serde(default = "HotkeyConfig::default_clear_session")]
@@ -146,10 +144,6 @@ pub struct HotkeyConfig {
 impl HotkeyConfig {
     fn default_toggle_ask() -> String {
         "Ctrl+Enter".into()
-    }
-
-    fn default_toggle_record() -> String {
-        "Ctrl+Shift+Enter".into()
     }
 
     fn default_toggle_hide() -> String {
@@ -169,7 +163,6 @@ impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {
             toggle_ask_panel: Self::default_toggle_ask(),
-            toggle_record: Self::default_toggle_record(),
             toggle_hide: Self::default_toggle_hide(),
             clear_session: Self::default_clear_session(),
             capture_screenshot: Self::default_capture(),

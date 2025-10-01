@@ -15,7 +15,7 @@ fn main() -> Result<()> {
             .with_inner_size(egui::vec2(900.0, 640.0))
             .with_always_on_top()
             .with_transparent(true)
-            .with_decorations(true) // Keep decorations for now (can be disabled later)
+            .with_decorations(false)
             .with_resizable(true),
         follow_system_theme: false,
         centered: true,

@@ -11,11 +11,10 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
 
-use crate::audio::AudioRecorder;
 use crate::capture::{capture_screen, CaptureResult};
 use crate::config::{self, AppConfig};
 use crate::hotkeys::{self, HotkeyAction, HotkeyHandle};
-use crate::openai::{AnalyzeRequest, AnalyzeResponse, OpenAIClient};
+use crate::openai::{AnalyzeRequest, AnalyzeResponse, OpenAIClient, StreamEvent};
 use crate::session::{ConversationEntry, ConversationRole, SessionManager};
 
 pub struct GhostApp {
@@ -31,6 +30,8 @@ pub struct GhostApp {
     events_rx: UnboundedReceiver<AppEvent>,
     events_tx: UnboundedSender<AppEvent>,
     request_tx: UnboundedSender<AnalyzeRequest>,
+    stream_rx: UnboundedReceiver<(Uuid, StreamEvent)>,
+    stream_tx: UnboundedSender<(Uuid, StreamEvent)>,
     hotkey_rx: UnboundedReceiver<HotkeyAction>,
     _hotkey_handle: Option<HotkeyHandle>,
     status: Option<StatusMessage>,
@@ -38,10 +39,6 @@ pub struct GhostApp {
     is_hidden: bool,
     active_request: Option<Uuid>,
     auto_scroll: bool,
-    audio_recorder: Option<AudioRecorder>,
-    is_recording: bool,
-    transcription_pending: bool,
-    last_transcription: Option<String>,
 }
 
 impl GhostApp {
@@ -74,7 +71,8 @@ impl GhostApp {
 
         let (events_tx, events_rx) = mpsc::unbounded_channel();
         let (request_tx, request_rx) = mpsc::unbounded_channel();
-        spawn_analyze_worker(&runtime, Arc::clone(&openai), request_rx, events_tx.clone());
+        let (stream_tx, stream_rx) = mpsc::unbounded_channel();
+        spawn_analyze_worker(&runtime, Arc::clone(&openai), request_rx, events_tx.clone(), stream_tx.clone());
 
         let (hotkey_tx, hotkey_rx) = mpsc::unbounded_channel();
         let hotkey_bindings = hotkeys::bindings_from_config(&config.hotkeys);
@@ -103,6 +101,8 @@ impl GhostApp {
             events_rx,
             events_tx,
             request_tx,
+            stream_rx,
+            stream_tx,
             hotkey_rx,
             _hotkey_handle: hotkey_handle,
             status: None,
@@ -110,10 +110,6 @@ impl GhostApp {
             is_hidden: false,
             active_request: None,
             auto_scroll: true,
-            audio_recorder: None,
-            is_recording: false,
-            transcription_pending: false,
-            last_transcription: None,
         }
     }
 
@@ -122,6 +118,10 @@ impl GhostApp {
             match event {
                 AppEvent::AnalysisStarted { request_id } => {
                     self.active_request = Some(request_id);
+                    // Create placeholder entry for streaming
+                    let entry = ConversationEntry::new(ConversationRole::Assistant, String::new());
+                    self.conversation.push(entry);
+                    self.auto_scroll = true;
                     self.show_status(
                         "Analyzing with OpenAI…",
                         StatusKind::Info,
@@ -129,13 +129,13 @@ impl GhostApp {
                     );
                 }
                 AppEvent::AnalysisFinished { response } => {
-                    let entry = ConversationEntry::new(
-                        ConversationRole::Assistant,
-                        response.answer.clone(),
-                    );
-                    self.session.append(entry.clone());
-                    self.conversation.push(entry);
-                    self.auto_scroll = true;
+                    // Update the last entry with the final answer
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.content = response.answer.clone();
+                            self.session.append(last.clone());
+                        }
+                    }
                     self.active_request = None;
                     if let Err(err) = self.session.write_plaintext_log() {
                         log::warn!("failed to persist conversation log: {err}");
@@ -153,35 +153,41 @@ impl GhostApp {
                     self.active_request = None;
                     self.show_status(format!("Analysis failed: {error}"), StatusKind::Error, None);
                 }
-                AppEvent::TranscriptionFinished { text } => {
-                    self.last_transcription = Some(text.clone());
-                    if self.ask_input.trim().is_empty() {
-                        self.ask_input = text.clone();
-                    } else {
-                        self.ask_input.push('\n');
-                        self.ask_input.push_str(&text);
-                    }
-                    self.transcription_pending = false;
-                    self.show_status(
-                        "Transcription completed",
-                        StatusKind::Success,
-                        Some(Duration::from_secs(2)),
-                    );
-                }
-                AppEvent::TranscriptionFailed { error } => {
-                    self.transcription_pending = false;
-                    self.show_status(
-                        format!("Transcription failed: {error}"),
-                        StatusKind::Error,
-                        None,
-                    );
-                }
                 AppEvent::Status {
                     text,
                     kind,
                     duration,
                 } => {
                     self.show_status(text, kind, duration);
+                }
+            }
+        }
+
+        // Process streaming events
+        while let Ok((request_id, stream_event)) = self.stream_rx.try_recv() {
+            if Some(request_id) != self.active_request {
+                continue;
+            }
+
+            match stream_event {
+                StreamEvent::Delta(delta) => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.content.push_str(&delta);
+                            self.auto_scroll = true;
+                        }
+                    }
+                }
+                StreamEvent::Done(full_text) => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.content = full_text;
+                        }
+                    }
+                }
+                StreamEvent::Error(error) => {
+                    log::error!("Stream error: {error}");
+                    self.show_status(format!("Stream error: {error}"), StatusKind::Error, None);
                 }
             }
         }
@@ -192,17 +198,6 @@ impl GhostApp {
             match action {
                 HotkeyAction::ToggleAskPanel => {
                     self.ask_panel_open = !self.ask_panel_open;
-                }
-                HotkeyAction::ToggleRecording => {
-                    if self.is_recording {
-                        self.stop_recording();
-                    } else if let Err(err) = self.start_recording() {
-                        self.show_status(
-                            format!("Failed to start recording: {err}"),
-                            StatusKind::Error,
-                            None,
-                        );
-                    }
                 }
                 HotkeyAction::ToggleHidden => {
                     self.is_hidden = !self.is_hidden;
@@ -248,64 +243,6 @@ impl GhostApp {
             Some(Duration::from_secs(2)),
         );
         Ok(())
-    }
-
-    fn start_recording(&mut self) -> Result<()> {
-        let recorder = AudioRecorder::start()?;
-        self.audio_recorder = Some(recorder);
-        self.is_recording = true;
-        self.transcription_pending = false;
-        self.show_status(
-            "Recording… press hotkey again to stop",
-            StatusKind::Info,
-            None,
-        );
-        Ok(())
-    }
-
-    fn stop_recording(&mut self) {
-        if let Some(recorder) = self.audio_recorder.take() {
-            self.is_recording = false;
-            match recorder.stop() {
-                Ok(recording) => {
-                    self.transcription_pending = true;
-                    self.enqueue_transcription(recording);
-                }
-                Err(err) => {
-                    self.show_status(
-                        format!("Failed to stop recorder: {err}"),
-                        StatusKind::Error,
-                        None,
-                    );
-                }
-            }
-        }
-    }
-
-    fn enqueue_transcription(&self, recording: crate::audio::RecordingResult) {
-        let tx = self.events_tx.clone();
-        let client = Arc::clone(&self.openai);
-        let cfg = self.config.openai.clone();
-        let language = self.config.transcription.language.clone();
-        let model = self.config.transcription.model.clone();
-        self.runtime.spawn(async move {
-            let status = AppEvent::Status {
-                text: "Transcribing audio…".into(),
-                kind: StatusKind::Info,
-                duration: Some(Duration::from_secs(2)),
-            };
-            let _ = tx.send(status);
-            match client.transcribe(&cfg, recording, language, &model).await {
-                Ok(text) => {
-                    let _ = tx.send(AppEvent::TranscriptionFinished { text });
-                }
-                Err(err) => {
-                    let _ = tx.send(AppEvent::TranscriptionFailed {
-                        error: err.to_string(),
-                    });
-                }
-            }
-        });
     }
 
     fn clear_session(&mut self) {
@@ -428,40 +365,21 @@ impl GhostApp {
 
     fn render_hud(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         ui.horizontal(|ui| {
-            let listen_label = if self.is_recording {
-                "Stop Recording"
-            } else {
-                "Start Recording"
-            };
-            if ui.button(listen_label).clicked() {
-                if self.is_recording {
-                    self.stop_recording();
-                } else if let Err(err) = self.start_recording() {
-                    self.show_status(format!("Failed to record: {err}"), StatusKind::Error, None);
-                }
-            }
-
             if ui
                 .button(if self.ask_panel_open {
-                    "Hide Ask Panel"
+                    "Hide Ask"
                 } else {
-                    "Show Ask Panel"
+                    "Show Ask"
                 })
                 .clicked()
             {
                 self.ask_panel_open = !self.ask_panel_open;
             }
 
-            if ui
-                .button(if self.is_hidden {
-                    "Show Window"
-                } else {
-                    "Hide Window"
-                })
-                .clicked()
-            {
-                self.is_hidden = !self.is_hidden;
-                // Note: Window visibility will be controlled in update() method
+            if ui.button("Capture Screenshot").clicked() {
+                if let Err(err) = self.capture_and_attach() {
+                    self.show_status(format!("Capture failed: {err}"), StatusKind::Error, None);
+                }
             }
 
             if ui.button("Settings").clicked() {
@@ -470,6 +388,17 @@ impl GhostApp {
 
             if ui.button("Clear Session").clicked() {
                 self.clear_session();
+            }
+
+            if ui
+                .button(if self.is_hidden {
+                    "Show"
+                } else {
+                    "Hide"
+                })
+                .clicked()
+            {
+                self.is_hidden = !self.is_hidden;
             }
         });
     }
@@ -487,13 +416,6 @@ impl GhostApp {
     }
 
     fn render_ask_panel(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        if let Some(last) = &self.last_transcription {
-            ui.label(
-                RichText::new(format!("Last voice input: {last}"))
-                    .italics()
-                    .color(Color32::from_gray(160)),
-            );
-        }
         let response = egui::TextEdit::multiline(&mut self.ask_input)
             .desired_rows(4)
             .hint_text("輸入問題或想法…")
@@ -681,11 +603,24 @@ impl eframe::App for GhostApp {
         // Handle window visibility based on is_hidden state
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(!self.is_hidden));
 
-        // Set transparent background
-        let frame_bg = egui::Color32::from_rgba_premultiplied(0, 0, 0, (255.0 * 0.95) as u8);
+        // Set transparent background with configurable opacity
+        let opacity = self.config.ui.opacity;
+        let frame_bg = egui::Color32::from_rgba_premultiplied(
+            22,
+            22,
+            22,
+            (255.0 * opacity) as u8,
+        );
         let mut style = (*ctx.style()).clone();
         style.visuals.window_fill = frame_bg;
         style.visuals.panel_fill = frame_bg;
+
+        // Customize colors to match plan.md theme
+        style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgba_premultiplied(30, 30, 30, (255.0 * opacity) as u8);
+        style.visuals.widgets.inactive.bg_fill = egui::Color32::from_rgba_premultiplied(43, 102, 246, (255.0 * opacity * 0.3) as u8);
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgba_premultiplied(43, 102, 246, (255.0 * opacity * 0.5) as u8);
+        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(43, 102, 246);
+
         ctx.set_style(style);
 
         egui::TopBottomPanel::top("hud").show(ctx, |ui| self.render_hud(ui, frame));
@@ -740,13 +675,14 @@ fn spawn_analyze_worker(
     client: Arc<OpenAIClient>,
     mut requests: UnboundedReceiver<AnalyzeRequest>,
     events: UnboundedSender<AppEvent>,
+    stream_tx: UnboundedSender<(Uuid, StreamEvent)>,
 ) {
     let events_clone = events.clone();
     runtime.spawn(async move {
         while let Some(request) = requests.recv().await {
             let request_id = request.request_id;
             let _ = events_clone.send(AppEvent::AnalysisStarted { request_id });
-            match client.analyze(request).await {
+            match client.analyze_stream(request, stream_tx.clone()).await {
                 Ok(response) => {
                     let _ = events_clone.send(AppEvent::AnalysisFinished { response });
                 }
@@ -847,12 +783,6 @@ enum AppEvent {
     },
     AnalysisFailed {
         request_id: Uuid,
-        error: String,
-    },
-    TranscriptionFinished {
-        text: String,
-    },
-    TranscriptionFailed {
         error: String,
     },
     Status {

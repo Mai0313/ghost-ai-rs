@@ -13,7 +13,6 @@ use crate::config::HotkeyConfig;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum HotkeyAction {
     ToggleAskPanel,
-    ToggleRecording,
     ToggleHidden,
     ClearSession,
     CaptureScreenshot,
@@ -249,12 +248,6 @@ pub fn bindings_from_config(cfg: &HotkeyConfig) -> Vec<HotkeyBinding> {
     if let Some(combo) = parse_combo(&cfg.toggle_ask_panel) {
         bindings.push(HotkeyBinding {
             action: HotkeyAction::ToggleAskPanel,
-            combo,
-        });
-    }
-    if let Some(combo) = parse_combo(&cfg.toggle_record) {
-        bindings.push(HotkeyBinding {
-            action: HotkeyAction::ToggleRecording,
             combo,
         });
     }
