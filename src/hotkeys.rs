@@ -45,18 +45,20 @@ impl HotkeyHandle {
         let sender = Arc::new(tx);
         let state = Arc::new(Mutex::new(HotkeyState::default()));
 
-        let thread = thread::Builder::new().name("ghost-hotkeys".to_string()).spawn({
-            let combos = Arc::clone(&combos);
-            let sender = Arc::clone(&sender);
-            let state = Arc::clone(&state);
-            move || {
-                if let Err(err) = listen(move |event| {
-                    handle_event(event.event_type, &combos, &sender, &state);
-                }) {
-                    log::error!("global hotkey listener failed: {err:?}");
+        let thread = thread::Builder::new()
+            .name("ghost-hotkeys".to_string())
+            .spawn({
+                let combos = Arc::clone(&combos);
+                let sender = Arc::clone(&sender);
+                let state = Arc::clone(&state);
+                move || {
+                    if let Err(err) = listen(move |event| {
+                        handle_event(event.event_type, &combos, &sender, &state);
+                    }) {
+                        log::error!("global hotkey listener failed: {err:?}");
+                    }
                 }
-            }
-        })?;
+            })?;
 
         Ok(Self { _thread: thread })
     }

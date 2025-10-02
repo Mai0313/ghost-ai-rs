@@ -32,12 +32,7 @@ impl AudioRecorder {
         let sample_format = config.sample_format();
         let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let stream = build_stream(
-            &device,
-            &config.into(),
-            sample_format,
-            Arc::clone(&buffer),
-        )?;
+        let stream = build_stream(&device, &config.into(), sample_format, Arc::clone(&buffer))?;
         stream.play().context("failed to begin audio capture")?;
 
         Ok(Self {

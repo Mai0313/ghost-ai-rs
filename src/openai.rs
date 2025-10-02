@@ -113,7 +113,8 @@ impl OpenAIClient {
                         if let Some(choice) = chunk.choices.first() {
                             if let Some(content) = &choice.delta.content {
                                 full_text.push_str(content);
-                                let _ = stream_tx.send((request_id, StreamEvent::Delta(content.clone())));
+                                let _ = stream_tx
+                                    .send((request_id, StreamEvent::Delta(content.clone())));
                             }
                         }
                     }
