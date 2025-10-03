@@ -17,7 +17,7 @@ use crate::capture::{capture_screen, CaptureResult};
 use crate::config::{self, AppConfig, CaptureMode, ThemeVariant};
 use crate::hotkeys::{self, HotkeyAction, HotkeyHandle};
 use crate::openai::{AnalyzeRequest, AnalyzeResponse, OpenAIClient, StreamEvent};
-use crate::session::{ConversationEntry, ConversationRole, SessionManager};
+use crate::session::{ConversationEntry, ConversationRole, SessionManager, WebSearchStatus};
 
 pub struct GhostApp {
     runtime: Handle,
@@ -46,6 +46,7 @@ pub struct GhostApp {
     prompt_editor_content: String,
     prompt_editor_dirty: bool,
     new_prompt_name: String,
+    history_index: Option<usize>, // None = Live mode
 }
 
 impl GhostApp {
@@ -169,6 +170,7 @@ impl GhostApp {
             prompt_editor_content,
             prompt_editor_dirty: false,
             new_prompt_name: String::new(),
+            history_index: None,
         }
     }
 
@@ -484,10 +486,50 @@ impl GhostApp {
                         }
                     }
                 }
+                StreamEvent::ReasoningDelta(delta) => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            if let Some(ref mut reasoning) = last.reasoning {
+                                reasoning.push_str(&delta);
+                            } else {
+                                last.reasoning = Some(delta);
+                            }
+                            self.auto_scroll = true;
+                        }
+                    }
+                }
                 StreamEvent::Done(full_text) => {
                     if let Some(last) = self.conversation.last_mut() {
                         if matches!(last.role, ConversationRole::Assistant) {
                             last.content = full_text;
+                        }
+                    }
+                }
+                StreamEvent::ReasoningDone(reasoning_text) => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.reasoning = Some(reasoning_text);
+                        }
+                    }
+                }
+                StreamEvent::WebSearchInProgress => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.web_search_status = WebSearchStatus::InProgress;
+                        }
+                    }
+                }
+                StreamEvent::WebSearchSearching => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.web_search_status = WebSearchStatus::Searching;
+                        }
+                    }
+                }
+                StreamEvent::WebSearchCompleted => {
+                    if let Some(last) = self.conversation.last_mut() {
+                        if matches!(last.role, ConversationRole::Assistant) {
+                            last.web_search_status = WebSearchStatus::Completed;
                         }
                     }
                 }
@@ -557,11 +599,151 @@ impl GhostApp {
         self.attach = None;
         self.attach_texture = None;
         self.auto_scroll = true;
+        self.history_index = None;
         self.show_status(
             "Session cleared",
             StatusKind::Info,
             Some(Duration::from_secs(2)),
         );
+    }
+
+    fn paginate_prev(&mut self) {
+        let total = self.conversation.len();
+        if total == 0 {
+            return;
+        }
+
+        self.history_index = Some(match self.history_index {
+            None if total > 1 => total - 2, // From Live to second-to-last
+            Some(idx) if idx > 0 => idx - 1,
+            Some(idx) => idx, // Already at first page
+            _ => 0,
+        });
+    }
+
+    fn paginate_next(&mut self) {
+        let total = self.conversation.len();
+        if total == 0 {
+            return;
+        }
+
+        self.history_index = match self.history_index {
+            Some(idx) if idx < total - 1 => Some(idx + 1),
+            Some(idx) if idx == total - 1 => None, // Back to Live
+            None => None, // Already at Live
+            _ => None,
+        };
+    }
+
+    fn get_page_label(&self) -> String {
+        let total = self.conversation.len();
+        match self.history_index {
+            None => "Live".to_string(),
+            Some(idx) => format!("{}/{}", idx + 1, total),
+        }
+    }
+
+    fn get_displayed_entries(&self) -> Vec<ConversationEntry> {
+        match self.history_index {
+            None => self.conversation.clone(),
+            Some(idx) => self.conversation.iter().take(idx + 1).cloned().collect(),
+        }
+    }
+
+    fn regenerate_answer(&mut self) {
+        // Get current display index
+        let current_idx = self.history_index.unwrap_or_else(|| {
+            if self.conversation.is_empty() {
+                return;
+            }
+            self.conversation.len() - 1
+        });
+
+        if current_idx >= self.conversation.len() {
+            self.show_status(
+                "No entry to regenerate",
+                StatusKind::Warning,
+                Some(Duration::from_secs(3)),
+            );
+            return;
+        }
+
+        // Get the question from current entry
+        let entry = &self.conversation[current_idx];
+        let question = if matches!(entry.role, ConversationRole::User) {
+            entry.content.clone()
+        } else if current_idx > 0 {
+            // If current entry is assistant, look for the previous user message
+            self.conversation[..current_idx]
+                .iter()
+                .rev()
+                .find(|e| matches!(e.role, ConversationRole::User))
+                .map(|e| e.content.clone())
+                .unwrap_or_default()
+        } else {
+            self.show_status(
+                "No question to regenerate from",
+                StatusKind::Warning,
+                Some(Duration::from_secs(3)),
+            );
+            return;
+        };
+
+        if question.is_empty() {
+            self.show_status(
+                "No question to regenerate from",
+                StatusKind::Warning,
+                Some(Duration::from_secs(3)),
+            );
+            return;
+        }
+
+        // Build history (exclude current and later entries)
+        let history: VecDeque<ConversationEntry> = self.conversation
+            .iter()
+            .take(current_idx)
+            .cloned()
+            .collect();
+
+        // Truncate conversation at current index
+        self.conversation.truncate(current_idx);
+
+        // Re-add the question if it was the assistant response we're regenerating
+        if !matches!(entry.role, ConversationRole::User) {
+            let user_entry = ConversationEntry::new(ConversationRole::User, question.clone());
+            self.session.append(user_entry.clone());
+            self.conversation.push(user_entry);
+        }
+
+        // Prepare request
+        let request_id = Uuid::new_v4();
+        let custom_prompt = self.load_active_prompt();
+        let screenshot = self.attach.as_ref().map(|att| att.png.clone());
+
+        let analyze_request = AnalyzeRequest {
+            request_id,
+            config: self.config.openai.clone(),
+            text_prompt: question,
+            custom_prompt,
+            screenshot_png: screenshot,
+            history,
+        };
+
+        if let Err(err) = self.request_tx.send(analyze_request) {
+            self.show_status(
+                format!("Failed to regenerate: {err}"),
+                StatusKind::Error,
+                None,
+            );
+        } else {
+            self.history_index = None; // Reset to Live mode
+            self.auto_scroll = true;
+            self.show_status(
+                "Regenerating answer...",
+                StatusKind::Info,
+                Some(Duration::from_secs(2)),
+            );
+        }
     }
 
     fn submit_current_prompt(&mut self) {
@@ -613,6 +795,7 @@ impl GhostApp {
             self.attach_texture = None;
             self.ask_input.clear();
             self.auto_scroll = true;
+            self.history_index = None; // Reset to Live mode when submitting new prompt
         }
     }
 
@@ -696,6 +879,22 @@ impl GhostApp {
                 self.clear_session();
             }
 
+            // Pagination controls
+            ui.separator();
+            if ui.button("◀").clicked() {
+                self.paginate_prev();
+            }
+            ui.label(self.get_page_label());
+            if ui.button("▶").clicked() {
+                self.paginate_next();
+            }
+
+            // Regenerate button
+            if ui.button("🔄 Regenerate").clicked() {
+                self.regenerate_answer();
+            }
+
+            ui.separator();
             if ui
                 .button(if self.is_hidden { "Show" } else { "Hide" })
                 .clicked()
@@ -706,12 +905,14 @@ impl GhostApp {
     }
 
     fn render_conversation(&mut self, ui: &mut egui::Ui) {
-        let scroll_to_bottom = self.auto_scroll;
+        let scroll_to_bottom = self.auto_scroll && self.history_index.is_none();
+        let displayed_entries = self.get_displayed_entries();
+
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .stick_to_bottom(true)
+            .stick_to_bottom(self.history_index.is_none())
             .show(ui, |ui| {
-                for entry in &self.conversation {
+                for entry in &displayed_entries {
                     self.render_entry(ui, entry);
                     ui.add_space(6.0);
                 }
@@ -722,6 +923,68 @@ impl GhostApp {
         if scroll_to_bottom {
             self.auto_scroll = false;
         }
+    }
+
+    fn render_entry(&self, ui: &mut egui::Ui, entry: &ConversationEntry) {
+        use egui::{Color32, Frame, Margin, RichText};
+
+        let bg_color = match entry.role {
+            ConversationRole::User => Color32::from_rgba_premultiplied(43, 102, 246, 40),
+            ConversationRole::Assistant => Color32::from_rgba_premultiplied(60, 60, 60, 40),
+            ConversationRole::System => Color32::from_rgba_premultiplied(100, 100, 100, 40),
+            ConversationRole::Reasoning => Color32::from_rgba_premultiplied(150, 100, 200, 40),
+            ConversationRole::Error => Color32::from_rgba_premultiplied(255, 40, 40, 40),
+        };
+
+        let label_color = match entry.role {
+            ConversationRole::User => Color32::from_rgb(120, 180, 255),
+            ConversationRole::Assistant => Color32::from_rgb(200, 200, 200),
+            ConversationRole::System => Color32::from_rgb(150, 150, 150),
+            ConversationRole::Reasoning => Color32::from_rgb(200, 150, 255),
+            ConversationRole::Error => Color32::from_rgb(255, 150, 150),
+        };
+
+        Frame::none()
+            .fill(bg_color)
+            .inner_margin(Margin::symmetric(8.0, 6.0))
+            .rounding(4.0)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(entry.role.label()).color(label_color).strong());
+
+                    // Show web search status
+                    match entry.web_search_status {
+                        WebSearchStatus::InProgress => {
+                            ui.label(RichText::new("🔍 Searching...").color(Color32::from_rgb(100, 180, 255)));
+                        }
+                        WebSearchStatus::Searching => {
+                            ui.label(RichText::new("🔍 Searching...").color(Color32::from_rgb(100, 180, 255)));
+                        }
+                        WebSearchStatus::Completed => {
+                            ui.label(RichText::new("✓ Search complete").color(Color32::from_rgb(120, 200, 120)));
+                        }
+                        WebSearchStatus::NotUsed => {}
+                    }
+                });
+                ui.add_space(2.0);
+
+                if matches!(entry.role, ConversationRole::Assistant | ConversationRole::Reasoning) {
+                    Self::render_markdown(ui, &entry.content);
+                } else {
+                    ui.label(&entry.content);
+                }
+
+                // Show reasoning if available
+                if let Some(ref reasoning) = entry.reasoning {
+                    if !reasoning.is_empty() {
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.label(RichText::new("Reasoning:").color(Color32::from_rgb(200, 150, 255)).strong());
+                        ui.add_space(2.0);
+                        Self::render_markdown(ui, reasoning);
+                    }
+                }
+            });
     }
 
     fn render_markdown(ui: &mut egui::Ui, text: &str) {

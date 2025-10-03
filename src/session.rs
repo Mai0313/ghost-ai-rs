@@ -29,10 +29,29 @@ impl ConversationRole {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchStatus {
+    NotUsed,
+    InProgress,
+    Searching,
+    Completed,
+}
+
+impl Default for WebSearchStatus {
+    fn default() -> Self {
+        WebSearchStatus::NotUsed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationEntry {
     pub id: Uuid,
     pub role: ConversationRole,
     pub content: String,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
+    pub web_search_status: WebSearchStatus,
     pub timestamp: DateTime<Utc>,
 }
 
@@ -42,6 +61,8 @@ impl ConversationEntry {
             id: Uuid::new_v4(),
             role,
             content: content.into(),
+            reasoning: None,
+            web_search_status: WebSearchStatus::NotUsed,
             timestamp: Utc::now(),
         }
     }
@@ -103,19 +124,55 @@ impl SessionManager {
 
     pub fn write_plaintext_log(&self) -> Result<PathBuf> {
         let guard = self.state.lock();
-        let filename = format!("{}-conversation.txt", guard.session_id);
-        let path = self.log_dir.join(filename);
+        let txt_filename = format!("{}-conversation.txt", guard.session_id);
+        let json_filename = format!("{}-conversation.json", guard.session_id);
+        let txt_path = self.log_dir.join(txt_filename);
+        let json_path = self.log_dir.join(json_filename);
+
+        // Write plain text log
         let mut buffer = String::new();
         for entry in &guard.entries {
             buffer.push_str(&format!(
-                "[{timestamp}] {role}:\n{content}\n\n",
+                "[{timestamp}] {role}:\n{content}\n",
                 timestamp = entry.timestamp.to_rfc3339(),
                 role = entry.role.label(),
                 content = entry.content
             ));
+
+            // Add reasoning if present
+            if let Some(ref reasoning) = entry.reasoning {
+                if !reasoning.is_empty() {
+                    buffer.push_str(&format!("\n[Reasoning]\n{reasoning}\n"));
+                }
+            }
+
+            // Add web search status if used
+            match entry.web_search_status {
+                WebSearchStatus::Completed => {
+                    buffer.push_str("[Web Search: Completed]\n");
+                }
+                WebSearchStatus::InProgress | WebSearchStatus::Searching => {
+                    buffer.push_str("[Web Search: In Progress]\n");
+                }
+                WebSearchStatus::NotUsed => {}
+            }
+
+            buffer.push_str("\n");
         }
-        fs::write(&path, buffer)
-            .with_context(|| format!("failed to write conversation log to {}", path.display()))?;
-        Ok(path)
+        fs::write(&txt_path, buffer)
+            .with_context(|| format!("failed to write conversation log to {}", txt_path.display()))?;
+
+        // Write JSON log (structured)
+        let json_data = serde_json::json!({
+            "session_id": guard.session_id,
+            "entries": guard.entries,
+            "entry_count": guard.entries.len(),
+        });
+        let json_content = serde_json::to_string_pretty(&json_data)
+            .context("failed to serialize conversation to JSON")?;
+        fs::write(&json_path, json_content)
+            .with_context(|| format!("failed to write JSON log to {}", json_path.display()))?;
+
+        Ok(txt_path)
     }
 }

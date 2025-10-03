@@ -3,6 +3,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+use keyring::Entry;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIConfig {
@@ -301,21 +302,58 @@ pub fn config_path() -> Result<PathBuf> {
 
 pub fn load_or_default() -> Result<AppConfig> {
     let path = config_path()?;
-    if !path.exists() {
-        return Ok(AppConfig::default());
+    let mut cfg = if !path.exists() {
+        AppConfig::default()
+    } else {
+        let raw = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read config file at {}", path.display()))?;
+        serde_json::from_str::<AppConfig>(&raw)
+            .with_context(|| format!("failed to parse config at {}", path.display()))?
+    };
+
+    // Load API key from keyring if not present in config
+    if cfg.openai.api_key.trim().is_empty() {
+        if let Some(api_key) = load_api_key_from_keyring() {
+            cfg.openai.api_key = api_key;
+        }
     }
 
-    let raw = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read config file at {}", path.display()))?;
-    let cfg = serde_json::from_str::<AppConfig>(&raw)
-        .with_context(|| format!("failed to parse config at {}", path.display()))?;
     Ok(cfg)
 }
 
 pub fn save(cfg: &AppConfig) -> Result<()> {
+    // Save API key to keyring if available
+    if !cfg.openai.api_key.trim().is_empty() {
+        if let Err(err) = save_api_key_to_keyring(&cfg.openai.api_key) {
+            log::warn!("Failed to save API key to keyring: {err}");
+        }
+    }
+
+    // Save config without API key (for security)
+    let mut safe_cfg = cfg.clone();
+    safe_cfg.openai.api_key = String::new();
+
     let path = config_path()?;
-    let json = serde_json::to_string_pretty(cfg).context("failed to serialize config")?;
+    let json = serde_json::to_string_pretty(&safe_cfg).context("failed to serialize config")?;
     fs::write(&path, json)
         .with_context(|| format!("failed to write config file at {}", path.display()))?;
     Ok(())
+}
+
+fn get_keyring_entry() -> Result<Entry> {
+    Entry::new("ghost-ai", "openai-api-key")
+        .context("failed to create keyring entry")
+}
+
+fn save_api_key_to_keyring(api_key: &str) -> Result<()> {
+    let entry = get_keyring_entry()?;
+    entry
+        .set_password(api_key)
+        .context("failed to save API key to keyring")?;
+    Ok(())
+}
+
+fn load_api_key_from_keyring() -> Option<String> {
+    let entry = get_keyring_entry().ok()?;
+    entry.get_password().ok()
 }

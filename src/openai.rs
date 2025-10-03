@@ -38,7 +38,12 @@ pub struct AnalyzeResponse {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Delta(String),
+    ReasoningDelta(String),
     Done(String),
+    ReasoningDone(String),
+    WebSearchInProgress,
+    WebSearchSearching,
+    WebSearchCompleted,
     Error(String),
 }
 
@@ -60,14 +65,19 @@ impl OpenAIClient {
         request: AnalyzeRequest,
         stream_tx: UnboundedSender<(Uuid, StreamEvent)>,
     ) -> Result<AnalyzeResponse> {
+        let request_id = request.request_id;
+        let model = request.config.model.clone();
+
+        // Check if we should use Responses API for advanced models
+        if is_responses_api_model(&model) {
+            return self.analyze_stream_responses_api(request, stream_tx).await;
+        }
+
         let url = build_endpoint(&request.config.base_url, CHAT_COMPLETIONS_PATH)?;
         let mut headers = auth_headers(&request.config.api_key)?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let mut payload = build_chat_payload(&request)?;
         payload.stream = true;
-
-        let request_id = request.request_id;
-        let model = request.config.model.clone();
 
         let res = self
             .http
@@ -173,6 +183,114 @@ impl OpenAIClient {
             request_id: request.request_id,
             answer,
             model: parsed.model.unwrap_or(request.config.model),
+        })
+    }
+
+    async fn analyze_stream_responses_api(
+        &self,
+        request: AnalyzeRequest,
+        stream_tx: UnboundedSender<(Uuid, StreamEvent)>,
+    ) -> Result<AnalyzeResponse> {
+        let url = build_endpoint(&request.config.base_url, "responses")?;
+        let mut headers = auth_headers(&request.config.api_key)?;
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        let payload = build_responses_payload(&request)?;
+        let request_id = request.request_id;
+        let model = request.config.model.clone();
+
+        let res = self
+            .http
+            .post(url)
+            .headers(headers)
+            .json(&payload)
+            .send()
+            .await
+            .context("failed to send responses API request")?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let body = res.text().await.unwrap_or_default();
+            let error = format!("OpenAI Responses API failed with status {status}: {body}");
+            let _ = stream_tx.send((request_id, StreamEvent::Error(error.clone())));
+            return Err(anyhow!(error));
+        }
+
+        let mut stream = res.bytes_stream();
+        let mut answer_text = String::new();
+        let mut reasoning_text = String::new();
+        let mut buffer = String::new();
+        let mut current_event_type: Option<String> = None;
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("failed to read chunk from responses stream")?;
+            let text = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&text);
+
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer = buffer[line_end + 1..].to_string();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if line.starts_with("event: ") {
+                    current_event_type = Some(line[7..].to_string());
+                    continue;
+                }
+
+                if !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    break;
+                }
+
+                if let Some(ref event_type) = current_event_type {
+                    match event_type.as_str() {
+                        "response.output_text.delta" => {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                                if let Some(delta) = parsed["delta"].as_str() {
+                                    answer_text.push_str(delta);
+                                    let _ = stream_tx.send((request_id, StreamEvent::Delta(delta.to_string())));
+                                }
+                            }
+                        }
+                        "response.reasoning_summary_text.delta" => {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {
+                                if let Some(delta) = parsed["delta"].as_str() {
+                                    reasoning_text.push_str(delta);
+                                    let _ = stream_tx.send((request_id, StreamEvent::ReasoningDelta(delta.to_string())));
+                                }
+                            }
+                        }
+                        "response.web_search_call.in_progress" => {
+                            let _ = stream_tx.send((request_id, StreamEvent::WebSearchInProgress));
+                        }
+                        "response.web_search_call.searching" => {
+                            let _ = stream_tx.send((request_id, StreamEvent::WebSearchSearching));
+                        }
+                        "response.web_search_call.completed" => {
+                            let _ = stream_tx.send((request_id, StreamEvent::WebSearchCompleted));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if !reasoning_text.is_empty() {
+            let _ = stream_tx.send((request_id, StreamEvent::ReasoningDone(reasoning_text.clone())));
+        }
+        let _ = stream_tx.send((request_id, StreamEvent::Done(answer_text.clone())));
+
+        Ok(AnalyzeResponse {
+            request_id,
+            answer: answer_text,
+            model,
         })
     }
 
@@ -411,4 +529,95 @@ struct StreamChoice {
 #[derive(Debug, Deserialize)]
 struct StreamDelta {
     pub content: Option<String>,
+}
+
+fn is_responses_api_model(model: &str) -> bool {
+    model.starts_with("gpt-5") || model.starts_with("o4-")
+}
+
+fn build_responses_payload(request: &AnalyzeRequest) -> Result<ResponsesPayload> {
+    let mut messages: Vec<ChatMessage> = Vec::new();
+
+    if let Some(prompt) = request.custom_prompt.as_ref() {
+        if !prompt.trim().is_empty() {
+            messages.push(ChatMessage {
+                role: "system".into(),
+                content: vec![MessageContent::Text(TextContent {
+                    text: prompt.trim().to_string(),
+                })],
+            });
+        }
+    }
+
+    for entry in request.history.iter().rev().take(20).rev() {
+        let role = match entry.role {
+            crate::session::ConversationRole::System => "system",
+            crate::session::ConversationRole::User => "user",
+            crate::session::ConversationRole::Assistant | crate::session::ConversationRole::Reasoning => "assistant",
+            crate::session::ConversationRole::Error => "system",
+        };
+        messages.push(ChatMessage {
+            role: role.to_string(),
+            content: vec![MessageContent::Text(TextContent {
+                text: entry.content.clone(),
+            })],
+        });
+    }
+
+    let mut user_content = vec![MessageContent::Text(TextContent {
+        text: request.text_prompt.trim().to_string(),
+    })];
+
+    if let Some(png) = request.screenshot_png.as_ref() {
+        let base64 = general_purpose::STANDARD.encode(png);
+        let data_url = format!("data:image/png;base64,{base64}");
+        user_content.push(MessageContent::Image(ImageContent {
+            image_url: ImageUrl {
+                url: data_url,
+                detail: Some("auto".to_string()),
+            },
+        }));
+    }
+
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: user_content,
+    });
+
+    let mut modalities = vec!["text".to_string()];
+    if request.config.model.starts_with("gpt-5") {
+        modalities.push("web_search".to_string());
+    }
+
+    Ok(ResponsesPayload {
+        model: request.config.model.clone(),
+        messages,
+        temperature: request.config.temperature,
+        max_tokens: request.config.max_output_tokens,
+        modalities,
+        reasoning_effort: if request.config.model.starts_with("gpt-5") {
+            Some("high".to_string())
+        } else {
+            None
+        },
+        service_tier: if request.config.model.starts_with("gpt-5") {
+            Some("priority".to_string())
+        } else {
+            None
+        },
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct ResponsesPayload {
+    model: String,
+    messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    temperature: f32,
+    modalities: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service_tier: Option<String>,
 }

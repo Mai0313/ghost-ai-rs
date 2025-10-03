@@ -33,6 +33,21 @@ Ghost AI is a privacy-first desktop assistant implemented entirely in Rust. It c
 - [Rust toolchain](https://www.rust-lang.org/tools/install) (1.75 or newer recommended).
 - OpenAI API key with access to the models you intend to call.
 
+#### Linux System Dependencies
+
+On Linux, the following system libraries are required for global hotkeys and audio support:
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install libxtst-dev libasound2-dev
+
+# Fedora/RHEL
+sudo dnf install libXtst-devel alsa-lib-devel
+
+# Arch Linux
+sudo pacman -S libxtst alsa-lib
+```
+
 ### Build and Run
 
 ```bash
